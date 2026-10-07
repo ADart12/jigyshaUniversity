@@ -3,13 +3,14 @@ import { Link, useOutletContext } from 'react-router-dom';
 import {
   Plus, Minus, Navigation, Layers, RefreshCw, AlertTriangle,
   ChevronRight, Volume2, Bell, ShieldAlert, CloudRain,
-  Clock, CheckCircle, Info, ExternalLink, Mountain, Activity, MapPin
+  Clock, CheckCircle, Info, ExternalLink, Mountain, Activity, MapPin,
+  RotateCcw, Sliders, Play
 } from 'lucide-react';
 import { fetchRiskMap, fetchClosures, getVoiceAlertUrl } from '../api/client';
 import { adaptSegment, getLevelMeta } from '../api/adapters';
 import { RiskIcon, RiskBadge } from '../components/RiskIcon';
 import { ListenButton } from '../components/ListenButton';
-import { InteractiveMap } from '../components/InteractiveMap';
+import { InteractiveMap, MAP_LAYERS } from '../components/InteractiveMap';
 import { SEGMENTS } from '../data/segments';
 
 // Right sidebar segment detail matching reference design
@@ -218,12 +219,14 @@ export const LiveMap = () => {
   const [closures, setClosures] = useState([]);
   const [riskMeta, setRiskMeta] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isFetchingLive, setIsFetchingLive] = useState(false);
+  const [toastMsg, setToastMsg] = useState(null);
   const [error, setError] = useState(null);
   const [selectedSegment, setSelectedSegment] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const mapRef = useRef(null);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (refreshWeather = false) => {
     try {
       setLoading(true);
       setError(null);
@@ -232,6 +235,7 @@ export const LiveMap = () => {
           lang,
           simulateRainMm: demo.simulateRainMm,
           asOf: demo.asOf,
+          refreshWeather: refreshWeather,
         }),
         fetchClosures({ activeOnly: true }),
       ]);
@@ -266,6 +270,67 @@ export const LiveMap = () => {
       setLoading(false);
     }
   }, [lang, demo.simulateRainMm, demo.asOf]);
+
+  const handleLiveFetch = async () => {
+    try {
+      setIsFetchingLive(true);
+      if (demo.simulateRainMm != null) {
+        ctx.deactivate?.();
+      }
+      await loadData(true);
+      setToastMsg('Live weather updated from Open-Meteo API (Source: LIVE)');
+      setTimeout(() => setToastMsg(null), 4000);
+    } catch (e) {
+      setToastMsg('Failed to refresh live weather. Check backend connection.');
+      setTimeout(() => setToastMsg(null), 4000);
+    } finally {
+      setIsFetchingLive(false);
+    }
+  };
+
+  const handleResetSim = async () => {
+    ctx.deactivate?.();
+    setIsFetchingLive(true);
+    try {
+      await loadData(true);
+      setToastMsg('Rainfall simulation cleared. Restored live Open-Meteo meteorology.');
+      setTimeout(() => setToastMsg(null), 4000);
+    } catch (e) {
+      setToastMsg('Reset complete.');
+      setTimeout(() => setToastMsg(null), 4000);
+    } finally {
+      setIsFetchingLive(false);
+    }
+  };
+
+  const [tileMode, setTileMode] = useState('terrain');
+  const [showLayerMenu, setShowLayerMenu] = useState(false);
+
+  const handleToggleLayer = () => {
+    const modes = ['terrain', 'carto', 'satellite'];
+    const nextIdx = (modes.indexOf(tileMode) + 1) % modes.length;
+    const nextMode = modes[nextIdx];
+    setTileMode(nextMode);
+    const labels = {
+      terrain: '🏔️ Mountain Terrain (Topographic)',
+      carto: '🗺️ Clean Streets (Roads & Towns)',
+      satellite: '🛰️ Satellite Imagery (Himalayas)',
+    };
+    setToastMsg(`Map Style: ${labels[nextMode]}`);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
+
+  const handleSelectTileMode = (mode) => {
+    setTileMode(mode);
+    setShowLayerMenu(false);
+    const labels = {
+      terrain: '🏔️ Mountain Terrain (Topographic)',
+      carto: '🗺️ Clean Streets (Roads & Towns)',
+      satellite: '🛰️ Satellite Imagery (Himalayas)',
+    };
+    setToastMsg(`Map Style: ${labels[mode]}`);
+    setTimeout(() => setToastMsg(null), 3000);
+  };
 
   useEffect(() => {
     loadData();
@@ -320,26 +385,86 @@ export const LiveMap = () => {
               selectedSegment={selectedSegment}
               onSelectSegment={setSelectedSegment}
               lang={lang}
+              tileMode={tileMode}
+              onTileModeChange={setTileMode}
             />
           </div>
 
           {/* Floating Live Corridor Status Pill in top-left of map */}
-          <div className="absolute top-4 left-16 z-[400] hidden sm:flex items-center gap-3 bg-[#0c1821]/90 backdrop-blur-md text-white px-4 py-2 rounded-full shadow-xl border border-white/10 text-xs font-sans">
-            <div className="flex items-center gap-1.5 font-bold tracking-wider text-emerald-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              LIVE
-            </div>
-            <span className="text-gray-300 font-semibold">NH-7 (247 km)</span>
-            <span className="text-gray-400">|</span>
-            <span className="text-gray-300">Segments: <strong className="text-white">{segments.length || 18}</strong></span>
-            <span className="text-gray-400">|</span>
+          <div className="absolute top-4 left-16 z-[400] flex flex-wrap items-center gap-2.5 bg-[#0c1821]/95 backdrop-blur-md text-white px-3.5 py-2 rounded-full shadow-2xl border border-white/10 text-xs font-sans max-w-[calc(100vw-80px)] sm:max-w-none">
+            {demo.simulateRainMm != null ? (
+              <div className="flex items-center gap-1.5 font-bold tracking-wider text-amber-300 bg-amber-950/80 border border-amber-500/50 px-2.5 py-0.5 rounded-full shadow-[0_0_10px_rgba(245,158,11,0.3)]">
+                <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+                SIMULATED ({demo.simulateRainMm} mm)
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 font-bold tracking-wider text-emerald-400">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                LIVE
+              </div>
+            )}
+
+            <span className="text-gray-300 font-semibold hidden md:inline">NH-7 (247 km)</span>
+            <span className="text-gray-500 hidden md:inline">|</span>
+            <span className="text-gray-300 hidden sm:inline">Segments: <strong className="text-white">{segments.length || 18}</strong></span>
+            <span className="text-gray-500 hidden sm:inline">|</span>
             <span className="text-orange-400">High/Severe: <strong className="text-white">{highOrSevereCount}</strong></span>
-            <span className="text-gray-400">|</span>
-            <span className="text-gray-300 flex items-center gap-1">Weather: <strong className="text-emerald-400">{riskMeta?.weatherSource ? riskMeta.weatherSource.toUpperCase() : 'LIVE'}</strong></span>
-            <span className="text-gray-400">|</span>
-            <span className="flex items-center gap-1 text-sky-300">
+            <span className="text-gray-500">|</span>
+            
+            <span className="text-gray-300 flex items-center gap-1">
+              Weather:{' '}
+              <strong className={
+                demo.simulateRainMm != null
+                  ? 'text-amber-400 font-bold'
+                  : riskMeta?.weatherSource === 'live'
+                  ? 'text-emerald-400 font-bold'
+                  : 'text-sky-300 font-bold'
+              }>
+                {demo.simulateRainMm != null ? 'SIMULATED' : (riskMeta?.weatherSource ? riskMeta.weatherSource.toUpperCase() : 'LIVE')}
+              </strong>
+            </span>
+
+            <span className="text-gray-500 hidden sm:inline">|</span>
+            <span className="flex items-center gap-1 text-sky-300 hidden sm:inline-flex">
               <CloudRain className="w-3.5 h-3.5" /> 12°C
             </span>
+
+            {/* Live Fetch & Simulate interactive buttons */}
+            <div className="flex items-center gap-1.5 pl-2 border-l border-white/20">
+              <button
+                onClick={handleLiveFetch}
+                disabled={isFetchingLive}
+                className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-950/80 hover:bg-emerald-800 text-emerald-300 hover:text-white border border-emerald-500/40 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+                title="Bypass cache and force live weather fetch from Open-Meteo API"
+              >
+                <RefreshCw className={`w-3 h-3 ${isFetchingLive ? 'animate-spin text-emerald-400' : ''}`} />
+                <span>{isFetchingLive ? 'Fetching...' : 'Live Fetch'}</span>
+              </button>
+
+              <button
+                onClick={() => ctx.openSimModal?.()}
+                className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-all shadow-sm cursor-pointer ${
+                  demo.simulateRainMm != null
+                    ? 'bg-amber-500/30 hover:bg-amber-500/40 border-amber-400 text-amber-200'
+                    : 'bg-sky-950/80 hover:bg-sky-800 border-sky-500/40 text-sky-300 hover:text-white'
+                }`}
+                title="Open Rainfall Simulation Studio"
+              >
+                <CloudRain className="w-3 h-3 text-sky-400" />
+                <span>Simulate</span>
+              </button>
+
+              {demo.simulateRainMm != null && (
+                <button
+                  onClick={handleResetSim}
+                  className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-rose-950/80 hover:bg-rose-900 border border-rose-500/50 text-rose-300 hover:text-white transition-all cursor-pointer"
+                  title="Reset simulation to live weather"
+                >
+                  <RotateCcw className="w-3 h-3 text-rose-400" />
+                  <span className="hidden lg:inline">Reset</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Floating Map Controls on Top-Left */}
@@ -370,14 +495,86 @@ export const LiveMap = () => {
             >
               <Navigation className="w-4 h-4" />
             </button>
-            <button
-              onClick={() => mapRef.current?.toggleLayer?.()}
-              className="p-2 bg-white rounded-lg shadow-lg border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors"
-              aria-label="Toggle map view"
-              title="Toggle Terrain / Clean map"
-            >
-              <Layers className="w-4 h-4" />
-            </button>
+            {/* Map Styles Selector Button with Dropdown & Click-Cycle */}
+            <div className="relative">
+              <button
+                onClick={handleToggleLayer}
+                onContextMenu={(e) => { e.preventDefault(); setShowLayerMenu(m => !m); }}
+                className={`p-2 rounded-lg shadow-lg border transition-all flex items-center justify-center ${
+                  showLayerMenu || tileMode !== 'terrain'
+                    ? 'bg-sky-50 text-sky-600 border-sky-400 ring-2 ring-sky-200'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+                aria-label="Toggle map view"
+                title={`Map Style: ${MAP_LAYERS[tileMode]?.label || 'Map'} (Click to cycle, right-click/arrow to choose)`}
+              >
+                <Layers className="w-4 h-4" />
+              </button>
+
+              {/* Little dropdown trigger badge */}
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowLayerMenu(m => !m); }}
+                className="absolute -right-1.5 -top-1 w-4 h-4 rounded-full bg-slate-800 text-[9px] text-white flex items-center justify-center hover:bg-black transition-colors shadow"
+                title="Select map style"
+              >
+                ▾
+              </button>
+
+              {/* Interactive Layer Selection Flyout */}
+              {showLayerMenu && (
+                <div className="absolute left-12 top-0 z-[600] bg-[#0c1821]/95 text-white backdrop-blur-md rounded-xl p-2 shadow-2xl border border-white/15 w-48 space-y-1 font-sans text-xs animate-fadeIn">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 px-2 py-1 tracking-wider border-b border-white/10 flex items-center justify-between">
+                    <span>Map Styles</span>
+                    <button
+                      onClick={() => setShowLayerMenu(false)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {Object.values(MAP_LAYERS).map(layer => (
+                    <button
+                      key={layer.id}
+                      onClick={() => handleSelectTileMode(layer.id)}
+                      className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-left transition-colors cursor-pointer ${
+                        tileMode === layer.id
+                          ? 'bg-sky-500/25 text-sky-300 font-bold border border-sky-400/40'
+                          : 'text-slate-300 hover:text-white hover:bg-white/10'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span>{layer.icon}</span>
+                        <span>{layer.label}</span>
+                      </span>
+                      {tileMode === layer.id && <CheckCircle className="w-3.5 h-3.5 text-sky-400" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {/* Quick Map Controls for Live Fetch & Simulation */}
+            <div className="bg-white rounded-lg shadow-lg border border-slate-200 flex flex-col overflow-hidden">
+              <button
+                onClick={handleLiveFetch}
+                disabled={isFetchingLive}
+                className="p-2 text-emerald-700 hover:bg-emerald-50 transition-colors border-b border-slate-100"
+                aria-label="Live Fetch Weather"
+                title="Live Fetch: Force fresh Open-Meteo weather"
+              >
+                <RefreshCw className={`w-4 h-4 ${isFetchingLive ? 'animate-spin' : ''}`} />
+              </button>
+              <button
+                onClick={() => ctx.openSimModal?.()}
+                className={`p-2 transition-colors ${
+                  demo.simulateRainMm != null ? 'bg-amber-100 text-amber-700' : 'text-sky-700 hover:bg-sky-50'
+                }`}
+                aria-label="Rainfall Simulation Studio"
+                title="Simulate Rain: Stress-test highway under storm conditions"
+              >
+                <CloudRain className="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           {/* Floating Road Risk Level Legend in bottom-left of map */}
@@ -556,13 +753,21 @@ export const LiveMap = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <CloudRain className="w-4 h-4 text-sky-500" />
+            <button
+              onClick={handleLiveFetch}
+              disabled={isFetchingLive}
+              className="flex items-center gap-2 hover:bg-slate-200/60 p-1 rounded-lg transition-colors cursor-pointer text-left"
+              title="Click to force live Open-Meteo refresh"
+            >
+              <CloudRain className={`w-4 h-4 ${demo.simulateRainMm != null ? 'text-amber-500' : 'text-sky-500'}`} />
               <div>
-                <div className="font-black text-gray-900">LIVE</div>
-                <div className="text-[10px] text-gray-400">Weather data</div>
+                <div className="font-black text-gray-900 flex items-center gap-1">
+                  <span>{demo.simulateRainMm != null ? `SIM (${demo.simulateRainMm}mm)` : (riskMeta?.weatherSource ? riskMeta.weatherSource.toUpperCase() : 'LIVE')}</span>
+                  <RefreshCw className={`w-2.5 h-2.5 text-gray-400 ${isFetchingLive ? 'animate-spin text-emerald-500' : ''}`} />
+                </div>
+                <div className="text-[10px] text-gray-400">Weather feed (Click to refresh)</div>
               </div>
-            </div>
+            </button>
 
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-gray-400" />
@@ -584,6 +789,14 @@ export const LiveMap = () => {
           </div>
         </div>
       </footer>
+
+      {/* Floating Action Feedback Toast */}
+      {toastMsg && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[1100] bg-[#0c1821]/95 text-white border border-sky-500/40 px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-2.5 text-xs font-medium backdrop-blur-md animate-bounce">
+          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
     </div>
   );
 };

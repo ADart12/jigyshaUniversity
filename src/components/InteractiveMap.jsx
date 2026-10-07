@@ -163,9 +163,53 @@ function MapController({ selectedSegment, segments, onMapReady }) {
   return null;
 }
 
-export const InteractiveMap = forwardRef(({ segments, selectedSegment, onSelectSegment, lang }, ref) => {
+// Available map tile layer styles
+export const MAP_LAYERS = {
+  terrain: {
+    id: 'terrain',
+    label: 'Mountain Terrain',
+    labelHi: 'पहाड़ी इलाका',
+    icon: '🏔️',
+    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://opentopomap.org">OpenTopoMap</a> &copy; OpenStreetMap',
+    maxZoom: 17,
+    subdomains: ['a', 'b', 'c'],
+  },
+  carto: {
+    id: 'carto',
+    label: 'Clean Streets',
+    labelHi: 'सड़क नक्शा',
+    icon: '🗺️',
+    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
+    maxZoom: 19,
+    subdomains: ['a', 'b', 'c', 'd'],
+  },
+  satellite: {
+    id: 'satellite',
+    label: 'Satellite View',
+    labelHi: 'उपग्रह दृश्य',
+    icon: '🛰️',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: '&copy; Esri, Maxar, Earthstar Geographics',
+    maxZoom: 18,
+    subdomains: ['server'],
+  },
+};
+
+export const InteractiveMap = forwardRef(({
+  segments,
+  selectedSegment,
+  onSelectSegment,
+  lang,
+  tileMode: externalTileMode,
+  onTileModeChange,
+}, ref) => {
   const mapInstanceRef = useRef(null);
-  const [tileMode, setTileMode] = useState('terrain'); // 'terrain' | 'carto' | 'satellite'
+  const [internalTileMode, setInternalTileMode] = useState('terrain');
+
+  const activeTileMode = externalTileMode || internalTileMode;
+  const currentLayer = MAP_LAYERS[activeTileMode] || MAP_LAYERS.terrain;
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
@@ -194,20 +238,44 @@ export const InteractiveMap = forwardRef(({ segments, selectedSegment, onSelectS
       }
     },
     toggleLayer: () => {
-      setTileMode(prev => prev === 'terrain' ? 'carto' : 'terrain');
+      const modes = ['terrain', 'carto', 'satellite'];
+      const nextIdx = (modes.indexOf(activeTileMode) + 1) % modes.length;
+      const nextMode = modes[nextIdx];
+      if (onTileModeChange) {
+        onTileModeChange(nextMode);
+      } else {
+        setInternalTileMode(nextMode);
+      }
+      return nextMode;
     },
+    setTileMode: (mode) => {
+      if (MAP_LAYERS[mode]) {
+        if (onTileModeChange) {
+          onTileModeChange(mode);
+        } else {
+          setInternalTileMode(mode);
+        }
+      }
+    },
+    getTileMode: () => activeTileMode,
     invalidateSize: () => {
       if (mapInstanceRef.current) mapInstanceRef.current.invalidateSize();
     }
   }));
 
+  // Force map viewport invalidation on tile style change so tiles populate immediately
+  useEffect(() => {
+    if (mapInstanceRef.current) {
+      const timer = setTimeout(() => {
+        mapInstanceRef.current?.invalidateSize();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [activeTileMode]);
+
   // Center roughly in the Garhwal Himalayas (between Rishikesh and Joshimath)
   const defaultCenter = [30.3165, 78.9629];
   const defaultZoom = 9;
-
-  // Real mountain topographic hillshade tiles for Himalayan terrain, matching the reference image
-  const terrainTileUrl = "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png";
-  const cartoTileUrl = "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 
   return (
     <div className="w-full h-full relative z-0">
@@ -218,9 +286,11 @@ export const InteractiveMap = forwardRef(({ segments, selectedSegment, onSelectS
         zoomControl={false}
       >
         <TileLayer
-          attribution='&copy; <a href="https://opentopomap.org">OpenTopoMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
-          url={tileMode === 'terrain' ? terrainTileUrl : cartoTileUrl}
-          maxZoom={17}
+          key={activeTileMode}
+          attribution={currentLayer.attribution}
+          url={currentLayer.url}
+          maxZoom={currentLayer.maxZoom}
+          subdomains={currentLayer.subdomains}
         />
 
         <MapController

@@ -1,10 +1,18 @@
 import React, { useState, createContext, useContext } from 'react';
 import { Outlet, Link, useLocation, useSearchParams } from 'react-router-dom';
-import { Map, Navigation2, Bell, AlertCircle, Phone, Clock, Info, Menu, X } from 'lucide-react';
+import { Map, Navigation2, Bell, AlertCircle, Phone, Clock, Info, Menu, X, CloudRain, RotateCcw } from 'lucide-react';
+import { RainSimulationModal } from './RainSimulationModal';
 
 // Simple lang context if the store doesn't exist yet
 export const LangCtx = createContext({ lang: 'en', toggleLang: () => {} });
-export const DemoCtx = createContext({ demo: { active: false }, setStorm: () => {}, setTimeMachine: () => {}, deactivate: () => {} });
+export const DemoCtx = createContext({
+  demo: { active: false },
+  setStorm: () => {},
+  setTimeMachine: () => {},
+  deactivate: () => {},
+  openSimModal: () => {},
+  closeSimModal: () => {},
+});
 
 export function useLang() { return useContext(LangCtx); }
 export function useDemo() { return useContext(DemoCtx); }
@@ -35,9 +43,11 @@ const Layout = () => {
   const [shieldClicks, setShieldClicks] = useState(0);
   const [searchParams] = useSearchParams();
 
+  const [simModalOpen, setSimModalOpen] = useState(false);
+
   // Activate demo mode via ?demo=1 or 5 shield clicks
   const demoParam = searchParams.get('demo');
-  const isDemoActive = demo.active || demoParam === '1';
+  const isDemoActive = demo.active || demoParam === '1' || demo.simulateRainMm != null;
 
   const handleShieldClick = () => {
     const next = shieldClicks + 1;
@@ -53,8 +63,17 @@ const Layout = () => {
   const setStorm = (mm) => setDemo({ active: true, simulateRainMm: mm, asOf: null });
   const setTimeMachine = (date) => setDemo({ active: true, simulateRainMm: null, asOf: date });
   const deactivate = () => setDemo({ active: false, simulateRainMm: null, asOf: null });
+  const openSimModal = () => setSimModalOpen(true);
+  const closeSimModal = () => setSimModalOpen(false);
 
-  const demoCtxValue = { demo: { ...demo, active: isDemoActive }, setStorm, setTimeMachine, deactivate };
+  const demoCtxValue = {
+    demo: { ...demo, active: isDemoActive },
+    setStorm,
+    setTimeMachine,
+    deactivate,
+    openSimModal,
+    closeSimModal,
+  };
   const langCtxValue = { lang, toggleLang, setLang };
 
   return (
@@ -93,11 +112,37 @@ const Layout = () => {
               })}
             </nav>
 
-            <div className="ml-auto flex items-center gap-3">
-              {/* Demo chip */}
-              {isDemoActive && (
+            <div className="ml-auto flex items-center gap-2.5">
+              {/* Rain Simulation Trigger Button for presentation */}
+              <button
+                onClick={() => setSimModalOpen(true)}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full transition-all font-semibold border shadow-sm ${
+                  demo.simulateRainMm != null
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-400 font-bold shadow-[0_0_12px_rgba(245,158,11,0.35)] animate-pulse'
+                    : 'bg-[#1e293b] text-sky-300 hover:text-white hover:bg-[#334155] border-white/10'
+                }`}
+                title="Rainfall Simulation Override (For Presentation & Stress-Testing)"
+              >
+                <CloudRain className={`w-3.5 h-3.5 ${demo.simulateRainMm != null ? 'text-amber-400' : 'text-sky-400'}`} />
+                <span>{demo.simulateRainMm != null ? `Sim: ${demo.simulateRainMm} mm` : 'Simulate Rain'}</span>
+              </button>
+
+              {/* Quick Reset Button if Simulation is active */}
+              {demo.simulateRainMm != null && (
+                <button
+                  onClick={deactivate}
+                  className="hidden md:flex items-center gap-1 text-[11px] text-rose-300 hover:text-white bg-rose-950/60 hover:bg-rose-900 border border-rose-800/60 px-2.5 py-1 rounded-full transition-colors font-medium"
+                  title="Reset rainfall simulation to live weather"
+                >
+                  <RotateCcw className="w-3 h-3 text-rose-400" />
+                  <span>Reset</span>
+                </button>
+              )}
+
+              {/* Time Machine chip */}
+              {demo.asOf && (
                 <span className="hidden sm:inline text-xs font-condensed font-semibold px-2 py-0.5 rounded bg-amber-200 text-amber-900 border border-amber-300">
-                  {demo.asOf ? `Replay: ${demo.asOf}` : demo.simulateRainMm != null ? `Sim: ${demo.simulateRainMm} mm` : 'Demo'}
+                  Replay: {demo.asOf}
                 </span>
               )}
 
@@ -140,6 +185,16 @@ const Layout = () => {
           {/* Mobile dropdown menu */}
           {mobileMenuOpen && (
             <div className="lg:hidden bg-ink text-white z-10 border-t border-white/10">
+              <button
+                onClick={() => {
+                  setSimModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm text-sky-400 hover:text-white border-b border-white/10"
+              >
+                <CloudRain className="w-4 h-4" />
+                Rainfall Simulation Studio
+              </button>
               {NAV_ITEMS.slice(4).map(item => (
                 <Link
                   key={item.path}
@@ -165,8 +220,27 @@ const Layout = () => {
 
           {/* Main content */}
           <main className="flex-1 flex flex-col relative" id="main-content">
-            <Outlet context={{ lang, demo: demoCtxValue.demo, setStorm, setTimeMachine, deactivate, toggleLang }} />
+            <Outlet context={{
+              lang,
+              demo: demoCtxValue.demo,
+              setStorm,
+              setTimeMachine,
+              deactivate,
+              toggleLang,
+              openSimModal,
+              closeSimModal,
+              isSimModalOpen: simModalOpen,
+            }} />
           </main>
+
+          {/* Global Rainfall Simulation Modal */}
+          <RainSimulationModal
+            isOpen={simModalOpen}
+            onClose={() => setSimModalOpen(false)}
+            currentRainMm={demo.simulateRainMm}
+            onApply={(mm) => setStorm(mm)}
+            onReset={deactivate}
+          />
 
           {/* Bottom nav - compact only */}
           <nav
