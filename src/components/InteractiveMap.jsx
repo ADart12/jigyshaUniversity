@@ -3,21 +3,32 @@ import { MapContainer, TileLayer, Polyline, Tooltip, Marker, useMap } from 'reac
 import L from 'leaflet';
 import { getLevelMeta } from '../api/adapters';
 
-// Major towns along NH-7 to place prominent town markers with white labels exactly like the design
-const MAJOR_TOWNS = [
-  { name: 'Rishikesh', lat: 30.0869, lng: 78.2676, isStart: true },
-  { name: 'Devprayag', lat: 30.1459, lng: 78.5989 },
-  { name: 'Srinagar', lat: 30.2223, lng: 78.7844 },
-  { name: 'Karnaprayag', lat: 30.2587, lng: 79.2173 },
-  { name: 'Nandaprayag', lat: 30.3297, lng: 79.3244 },
-  { name: 'Chamoli', lat: 30.4100, lng: 79.3500 },
-  { name: 'Pipalkoti', lat: 30.4297, lng: 79.4304 },
-  { name: 'Joshimath', lat: 30.5564, lng: 79.5663, isEnd: true },
+// All towns along NH-7 with precise coordinates for dynamic start/destination markers
+export const ALL_TOWNS = [
+  { name: 'Rishikesh', lat: 30.0869, lng: 78.2676, isMajor: true },
+  { name: 'Shivpuri', lat: 30.1361, lng: 78.3898 },
+  { name: 'Byasi', lat: 30.1133, lng: 78.4387 },
+  { name: 'Kaudiyala', lat: 30.0751, lng: 78.5014 },
+  { name: 'Devprayag', lat: 30.1459, lng: 78.5989, isMajor: true },
+  { name: 'Teen Dhara', lat: 30.2106, lng: 78.6793 },
+  { name: 'Kirtinagar', lat: 30.2177, lng: 78.7452 },
+  { name: 'Srinagar', lat: 30.2223, lng: 78.7844, isMajor: true },
+  { name: 'Sirobagarh', lat: 30.2416, lng: 78.8534 },
+  { name: 'Rudraprayag', lat: 30.2851, lng: 78.9821, isMajor: true },
+  { name: 'Gauchar', lat: 30.2890, lng: 79.1552 },
+  { name: 'Karnaprayag', lat: 30.2587, lng: 79.2173, isMajor: true },
+  { name: 'Langasu', lat: 30.2880, lng: 79.2576 },
+  { name: 'Nandprayag', lat: 30.3297, lng: 79.3244, isMajor: true },
+  { name: 'Chamoli', lat: 30.4055, lng: 79.3536, isMajor: true },
+  { name: 'Birahi', lat: 30.4129, lng: 79.3937 },
+  { name: 'Pipalkoti', lat: 30.4297, lng: 79.4304, isMajor: true },
+  { name: 'Helang', lat: 30.5294, lng: 79.5284 },
+  { name: 'Joshimath', lat: 30.5564, lng: 79.5663, isMajor: true },
 ];
 
 function createTownMarkerIcon(town) {
   if (town.isEnd) {
-    // Red pin with dot for Joshimath destination
+    // Red pin with dot for destination
     return L.divIcon({
       className: 'town-marker-end',
       html: `
@@ -37,7 +48,7 @@ function createTownMarkerIcon(town) {
   }
 
   if (town.isStart) {
-    // Teal ring for Rishikesh starting point
+    // Teal ring for starting point
     return L.divIcon({
       className: 'town-marker-start',
       html: `
@@ -121,7 +132,6 @@ function getSegmentMidpoint(coords) {
 // Controller component to handle bounds and programmatic interactions
 function MapController({ selectedSegment, segments, onMapReady }) {
   const map = useMap();
-  const initialFittedRef = useRef(false);
 
   useEffect(() => {
     if (map) {
@@ -130,22 +140,23 @@ function MapController({ selectedSegment, segments, onMapReady }) {
     }
   }, [map, onMapReady]);
 
+  // Re-fit bounds whenever the route segment composition changes
+  const segmentsKey = segments?.map(s => s.id).join(',');
   useEffect(() => {
-    if (segments && segments.length > 0 && !initialFittedRef.current) {
+    if (segments && segments.length > 0) {
       const allCoords = segments.flatMap(s => s.coords || []);
       if (allCoords.length > 0) {
         try {
           const bounds = L.latLngBounds(allCoords);
           if (bounds.isValid()) {
-            map.fitBounds(bounds, { padding: [60, 60], maxZoom: 12 });
-            initialFittedRef.current = true;
+            map.fitBounds(bounds, { padding: [55, 55], maxZoom: 12 });
           }
         } catch (e) {
           console.warn('[InteractiveMap] fitBounds error:', e);
         }
       }
     }
-  }, [segments, map]);
+  }, [segmentsKey, map]);
 
   useEffect(() => {
     if (selectedSegment && selectedSegment.coords && selectedSegment.coords.length > 0) {
@@ -204,12 +215,31 @@ export const InteractiveMap = forwardRef(({
   lang,
   tileMode: externalTileMode,
   onTileModeChange,
+  originTown,
+  destTown,
 }, ref) => {
   const mapInstanceRef = useRef(null);
   const [internalTileMode, setInternalTileMode] = useState('terrain');
 
   const activeTileMode = externalTileMode || internalTileMode;
   const currentLayer = MAP_LAYERS[activeTileMode] || MAP_LAYERS.terrain;
+
+  const originNorm = (originTown || 'Rishikesh').toLowerCase().trim();
+  const destNorm = (destTown || 'Joshimath').toLowerCase().trim();
+
+  // Dynamically resolve town markers: origin gets start ring, destination gets end pin,
+  // and key intermediate towns get clean label tags
+  const townsToRender = React.useMemo(() => {
+    return ALL_TOWNS.map(t => {
+      const isStart = t.name.toLowerCase().trim() === originNorm;
+      const isEnd = t.name.toLowerCase().trim() === destNorm;
+      return {
+        ...t,
+        isStart,
+        isEnd,
+      };
+    }).filter(t => t.isStart || t.isEnd || t.isMajor);
+  }, [originNorm, destNorm]);
 
   useImperativeHandle(ref, () => ({
     zoomIn: () => {
@@ -382,9 +412,9 @@ export const InteractiveMap = forwardRef(({
         })}
 
         {/* Town labels along the route */}
-        {MAJOR_TOWNS.map(town => (
+        {townsToRender.map(town => (
           <Marker
-            key={town.name}
+            key={`${town.name}-${town.isStart ? 'start' : town.isEnd ? 'end' : 'mid'}`}
             position={[town.lat, town.lng]}
             icon={createTownMarkerIcon(town)}
             interactive={false}
