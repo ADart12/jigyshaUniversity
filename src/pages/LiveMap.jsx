@@ -45,15 +45,16 @@ function SegmentDetailPanel({ segment, lang, onClose }) {
     verdictText = "Go with care";
   }
 
-  // Realistic values from backend data
-  const rainPct = Math.min(Math.round(((segment.r3d || 15) / 50) * 100), 95);
-  const terrainPct = Math.min(Math.round((segment.terrainScore || 0.6) * 100), 92);
-  const reportsPct = Math.min(Math.round(((segment.reports24h || 0) / 5) * 100), 80);
+  // Accurate values from backend data
+  const rainVal = segment.r3d ?? segment.rain24h ?? 0;
+  const rainPct = Math.min(Math.round((rainVal / 50) * 100), 100);
+  const terrainPct = Math.min(Math.round((segment.terrainScore ?? 0.5) * 100), 100);
+  const reportsPct = Math.min(Math.round(((segment.reports24h ?? 0) / 5) * 100), 100);
 
   // Rainfall stats
-  const last24h = (segment.rain24h ?? (segment.r3d ? segment.r3d * 0.4 : 12.4)).toFixed(1);
-  const next24h = (segment.forecast24h ?? (segment.r3d ? segment.r3d * 0.6 : 18.2)).toFixed(1);
-  const next72h = (segment.forecast72h ?? (segment.r3d ? segment.r3d * 1.2 : 36.5)).toFixed(1);
+  const last24h = (segment.rain24h ?? (rainVal * 0.4)).toFixed(1);
+  const next24h = (segment.forecast24h ?? (rainVal * 0.6)).toFixed(1);
+  const next72h = (segment.forecast72h ?? (rainVal * 1.2)).toFixed(1);
 
   return (
     <div className="h-full overflow-y-auto p-5 space-y-5 bg-white font-sans text-gray-800 text-sm">
@@ -72,7 +73,7 @@ function SegmentDetailPanel({ segment, lang, onClose }) {
             {segment.nameEn || segment.name}
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
-            NH-7, km {segment.kmStart?.toFixed(0) || '17'} to {segment.kmEnd?.toFixed(0) || '24'}
+            NH-7, km {segment.kmStart != null ? segment.kmStart.toFixed(0) : '—'} to {segment.kmEnd != null ? segment.kmEnd.toFixed(0) : '—'}
           </p>
         </div>
         <span className={`px-2.5 py-1 rounded-full text-[11px] font-bold border tracking-wide uppercase shrink-0 ${riskBadgeBg}`}>
@@ -243,7 +244,7 @@ export const LiveMap = () => {
       merged.sort((a, b) => (a.seq || 0) - (b.seq || 0));
 
       setSegments(merged);
-      setClosures(closureData.closures || []);
+      setClosures(Array.isArray(closureData) ? closureData : (closureData?.closures || []));
       setRiskMeta({
         weatherSource: riskData.weather_source,
         asOf: riskData.as_of,
@@ -252,14 +253,15 @@ export const LiveMap = () => {
         updatedAt: adapted[0]?.updatedAt,
       });
 
-      // Default select Shivpuri to Byasi (seg_02) as shown in reference design if nothing selected
-      if (!selectedSegment && merged.length > 1) {
-        const defaultSeg = merged.find(s => s.id === 'seg_02') || merged[1];
-        setSelectedSegment(defaultSeg);
-      }
+      // Default select Shivpuri to Byasi (seg_02) or keep current selected updated
+      setSelectedSegment(prev => {
+        if (!prev) return merged.find(s => s.id === 'seg_02') || merged[1] || merged[0] || null;
+        return merged.find(s => s.id === prev.id) || prev;
+      });
       setLastUpdated(new Date());
     } catch (e) {
-      setError('Could not load risk data.');
+      console.error('Failed to load risk data:', e);
+      setError('Could not load risk data from backend. Please ensure backend server is active.');
     } finally {
       setLoading(false);
     }
@@ -275,11 +277,37 @@ export const LiveMap = () => {
   const highOrSevereCount = segments.filter(s => s.level === 2 || s.level === 3).length;
   const closedCount = segments.filter(s => s.level === 'closed').length;
 
-  // Stretches needing attention
-  const attentionStretches = segments.filter(s => s.level === 2 || s.level === 3 || s.level === 'closed');
+  // Stretches needing attention today (sorted by highest risk)
+  const attentionStretches = segments
+    .filter(s => s.level === 'closed' || s.level === 3 || s.level === 2 || s.level === 1)
+    .sort((a, b) => {
+      const order = { closed: 0, 3: 1, 2: 2, 1: 3 };
+      return (order[a.level] ?? 4) - (order[b.level] ?? 4);
+    })
+    .slice(0, 3);
+
+  const displayAttentionCards = attentionStretches.length > 0
+    ? attentionStretches
+    : segments.slice(0, 3);
 
   return (
     <div className="flex-1 w-full flex flex-col bg-slate-100 min-h-[calc(100dvh-60px)]">
+      {/* Error banner if backend has connection issues */}
+      {error && (
+        <div className="bg-rose-50 border-b border-rose-200 px-4 py-2.5 flex items-center justify-between text-xs text-rose-800 font-sans z-50">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={loadData}
+            className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-md transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Upper main view: Map with floating controls, status pills, and right detail panel */}
       <div className="flex-1 flex flex-col lg:flex-row relative min-h-[540px] xl:min-h-[580px]">
 
@@ -303,11 +331,11 @@ export const LiveMap = () => {
             </div>
             <span className="text-gray-300 font-semibold">NH-7 (247 km)</span>
             <span className="text-gray-400">|</span>
-            <span className="text-gray-300">Segments: <strong className="text-white">18</strong></span>
+            <span className="text-gray-300">Segments: <strong className="text-white">{segments.length || 18}</strong></span>
             <span className="text-gray-400">|</span>
-            <span className="text-orange-400">High/Severe: <strong className="text-white">{highOrSevereCount || 1}</strong></span>
+            <span className="text-orange-400">High/Severe: <strong className="text-white">{highOrSevereCount}</strong></span>
             <span className="text-gray-400">|</span>
-            <span className="text-gray-300 flex items-center gap-1">Weather: <strong className="text-emerald-400">LIVE</strong></span>
+            <span className="text-gray-300 flex items-center gap-1">Weather: <strong className="text-emerald-400">{riskMeta?.weatherSource ? riskMeta.weatherSource.toUpperCase() : 'LIVE'}</strong></span>
             <span className="text-gray-400">|</span>
             <span className="flex items-center gap-1 text-sky-300">
               <CloudRain className="w-3.5 h-3.5" /> 12°C
@@ -404,7 +432,7 @@ export const LiveMap = () => {
               <AlertTriangle className="w-5 h-5 text-rose-600" />
               <h2 className="font-bold text-gray-900 text-base">Stretches needing attention today</h2>
               <span className="bg-rose-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                {attentionStretches.length || 3}
+                {attentionStretches.length}
               </span>
             </div>
             <button
@@ -415,88 +443,79 @@ export const LiveMap = () => {
             </button>
           </div>
 
-          {/* Cards carousel */}
+          {/* Cards carousel dynamically driven by real backend segments */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {/* Card 1: High */}
-            <div
-              onClick={() => {
-                const seg = segments.find(s => s.id === 'seg_02') || segments[1];
-                if (seg) {
-                  setSelectedSegment(seg);
-                  mapRef.current?.flyToSegment(seg);
-                }
-              }}
-              className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between"
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-orange-500 text-white font-black text-[10px] px-2 py-0.5 rounded">HIGH</span>
-                  <span className="font-bold text-sm text-gray-900">Shivpuri → Byasi</span>
-                </div>
-                <div className="text-xs text-gray-500 mb-2">km 17 – 24</div>
-                <div className="flex items-center gap-3 text-[11px] text-gray-600">
-                  <span className="flex items-center gap-1"><CloudRain className="w-3.5 h-3.5 text-orange-500" /> Heavy rain</span>
-                  <span className="flex items-center gap-1"><Mountain className="w-3.5 h-3.5 text-slate-500" /> Unstable terrain</span>
-                </div>
-              </div>
-              <svg width="60" height="30" viewBox="0 0 60 30" fill="none">
-                <path d="M2 28 C 15 25, 25 15, 38 12 C 48 10, 52 4, 58 2" stroke="#f97316" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-            </div>
+            {displayAttentionCards.map(seg => {
+              const meta = getLevelMeta(seg.level);
+              const isSelected = selectedSegment?.id === seg.id;
+              let badgeColor = "bg-emerald-500 text-white";
+              let badgeText = "LOW";
+              let strokeColor = "#10b981";
 
-            {/* Card 2: Moderate */}
-            <div
-              onClick={() => {
-                const seg = segments.find(s => s.id === 'seg_05') || segments[4];
-                if (seg) {
-                  setSelectedSegment(seg);
-                  mapRef.current?.flyToSegment(seg);
-                }
-              }}
-              className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between"
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-amber-400 text-slate-900 font-black text-[10px] px-2 py-0.5 rounded">MODERATE</span>
-                  <span className="font-bold text-sm text-gray-900">Devprayag → Srinagar</span>
-                </div>
-                <div className="text-xs text-gray-500 mb-2">km 45 – 62</div>
-                <div className="flex items-center gap-3 text-[11px] text-gray-600">
-                  <span className="flex items-center gap-1"><CloudRain className="w-3.5 h-3.5 text-amber-500" /> Rain expected</span>
-                  <span className="flex items-center gap-1"><Mountain className="w-3.5 h-3.5 text-slate-500" /> Rockfall prone</span>
-                </div>
-              </div>
-              <svg width="60" height="30" viewBox="0 0 60 30" fill="none">
-                <path d="M2 26 C 20 22, 35 18, 58 10" stroke="#eab308" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-            </div>
+              if (seg.level === 'closed') {
+                badgeColor = "bg-slate-800 text-white";
+                badgeText = "CLOSED";
+                strokeColor = "#0f172a";
+              } else if (seg.level === 3) {
+                badgeColor = "bg-rose-600 text-white";
+                badgeText = "SEVERE";
+                strokeColor = "#ef4444";
+              } else if (seg.level === 2) {
+                badgeColor = "bg-orange-500 text-white";
+                badgeText = "HIGH";
+                strokeColor = "#f97316";
+              } else if (seg.level === 1) {
+                badgeColor = "bg-amber-400 text-slate-900";
+                badgeText = "MODERATE";
+                strokeColor = "#eab308";
+              }
 
-            {/* Card 3: Closed */}
-            <div
-              onClick={() => {
-                const seg = segments.find(s => s.id === 'seg_08') || segments[7];
-                if (seg) {
-                  setSelectedSegment(seg);
-                  mapRef.current?.flyToSegment(seg);
-                }
-              }}
-              className="bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between"
-            >
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="bg-slate-800 text-white font-black text-[10px] px-2 py-0.5 rounded">CLOSED</span>
-                  <span className="font-bold text-sm text-gray-900">Srinagar</span>
+              return (
+                <div
+                  key={seg.id}
+                  onClick={() => {
+                    setSelectedSegment(seg);
+                    mapRef.current?.flyToSegment(seg);
+                  }}
+                  className={`bg-slate-50 hover:bg-slate-100 border rounded-xl p-3.5 cursor-pointer transition-all shadow-sm flex items-center justify-between ${
+                    isSelected ? 'ring-2 ring-sky-500 border-sky-400 bg-sky-50/50' : 'border-slate-200'
+                  }`}
+                >
+                  <div className="min-w-0 pr-2">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`${badgeColor} font-black text-[10px] px-2 py-0.5 rounded shrink-0`}>
+                        {badgeText}
+                      </span>
+                      <span className="font-bold text-sm text-gray-900 truncate">
+                        {seg.nameEn || seg.name}
+                      </span>
+                    </div>
+                    <div className="text-xs text-gray-500 mb-2">
+                      km {(seg.kmStart || 0).toFixed(0)} – {(seg.kmEnd || 0).toFixed(0)}
+                    </div>
+                    <div className="flex items-center gap-3 text-[11px] text-gray-600">
+                      <span className="flex items-center gap-1 truncate">
+                        <CloudRain className="w-3.5 h-3.5 text-sky-500 shrink-0" />
+                        {seg.rain24h ? `${seg.rain24h.toFixed(1)} mm rain` : 'Rain monitored'}
+                      </span>
+                      <span className="flex items-center gap-1 truncate">
+                        <Mountain className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                        {seg.driver || 'Terrain slope'}
+                      </span>
+                    </div>
+                  </div>
+                  <svg width="60" height="30" viewBox="0 0 60 30" fill="none" className="shrink-0">
+                    <path
+                      d="M2 28 C 15 25, 25 15, 38 12 C 48 10, 52 4, 58 2"
+                      stroke={strokeColor}
+                      strokeWidth="3.5"
+                      strokeLinecap="round"
+                      strokeDasharray={seg.level === 'closed' ? "4 4" : undefined}
+                    />
+                  </svg>
                 </div>
-                <div className="text-xs text-gray-500 mb-2">km 62 – 68</div>
-                <div className="flex items-center gap-3 text-[11px] text-gray-600">
-                  <span className="flex items-center gap-1 text-rose-600"><AlertTriangle className="w-3.5 h-3.5" /> Landslide</span>
-                  <span className="text-gray-500">Not passable</span>
-                </div>
-              </div>
-              <svg width="60" height="30" viewBox="0 0 60 30" fill="none">
-                <path d="M2 28 L 20 20 L 35 24 L 58 4" stroke="#0f172a" strokeWidth="3" strokeLinecap="round" strokeDasharray="4 4" />
-              </svg>
-            </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -524,7 +543,7 @@ export const LiveMap = () => {
             <div className="flex items-center gap-2">
               <span className="w-3.5 h-3.5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">!</span>
               <div>
-                <div className="font-black text-gray-900">{highOrSevereCount || 1}</div>
+                <div className="font-black text-gray-900">{highOrSevereCount}</div>
                 <div className="text-[10px] text-gray-400">High/Severe</div>
               </div>
             </div>
@@ -532,7 +551,7 @@ export const LiveMap = () => {
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-slate-800" />
               <div>
-                <div className="font-black text-gray-900">{closedCount || 1}</div>
+                <div className="font-black text-gray-900">{closedCount}</div>
                 <div className="text-[10px] text-gray-400">Closed</div>
               </div>
             </div>

@@ -160,3 +160,9 @@ export function getVoiceAlertUrl({ segmentId, lang = 'en' }) {
   if (segmentId) params.set('segment_id', segmentId);
   return `${BASE_URL}/voice-alert?${params}`;
 }
+
+export async function fetchHistory() {
+  const res = await apiFetch('/history');
+  return res.json();
+}
+

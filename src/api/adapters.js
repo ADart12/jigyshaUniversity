@@ -18,10 +18,56 @@ export function levelFromText(text) {
   return LEVEL_TEXT_MAP[text.toLowerCase().trim()] ?? 0;
 }
 
+export function parseCoords(subpoints, startLat, startLng, endLat, endLng) {
+  if (Array.isArray(subpoints) && subpoints.length > 0) {
+    const parsed = subpoints.map(pt => {
+      if (Array.isArray(pt) && pt.length >= 2) {
+        const lat = Number(pt[0]);
+        const lng = Number(pt[1]);
+        if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+      }
+      if (typeof pt === 'string') {
+        const parts = pt.trim().split(/[\s,]+/);
+        if (parts.length >= 2) {
+          const lat = parseFloat(parts[0]);
+          const lng = parseFloat(parts[1]);
+          if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+        }
+      }
+      if (pt && typeof pt === 'object' && ('lat' in pt || 'latitude' in pt)) {
+        const lat = Number(pt.lat ?? pt.latitude);
+        const lng = Number(pt.lng ?? pt.longitude);
+        if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+      }
+      return null;
+    }).filter(Boolean);
+
+    if (parsed.length > 0) return parsed;
+  }
+  if (startLat != null && startLng != null && endLat != null && endLng != null) {
+    const sLat = Number(startLat);
+    const sLng = Number(startLng);
+    const eLat = Number(endLat);
+    const eLng = Number(endLng);
+    if (!isNaN(sLat) && !isNaN(sLng) && !isNaN(eLat) && !isNaN(eLng)) {
+      return [[sLat, sLng], [eLat, eLng]];
+    }
+  }
+  return [];
+}
+
 // Determine the effective display level of a segment (may be 'closed')
 export function toEffective(seg) {
   if (seg.closure?.status === 'closed') return 'closed';
-  const base = scoreToLevel(seg.risk_score);
+  const score = seg.risk_score ?? seg.risk_index;
+  let base;
+  if (score != null && !isNaN(score)) {
+    base = scoreToLevel(score);
+  } else if (seg.risk_level) {
+    base = levelFromText(seg.risk_level);
+  } else {
+    base = 0;
+  }
   return seg.adjusted_risk_level ? Math.min(3, base + 1) : base;
 }
 
@@ -41,12 +87,13 @@ export function getLevelMeta(level) {
 // Adapt a raw segment from /risk-map to a UI model
 export function adaptSegment(raw) {
   const level = toEffective(raw);
+  const coords = parseCoords(raw.subpoints, raw.start_lat, raw.start_lng, raw.end_lat, raw.end_lng);
   return {
     id: raw.id,
     name: raw.name || raw.name_en,
     nameEn: raw.name_en || raw.name,
     seq: raw.sequence_order,
-    coords: raw.subpoints || [],
+    coords,
     level,
     score: raw.risk_score ?? raw.risk_index ?? 0,
     terrainScore: raw.terrain_score ?? raw.terrain_percentile ?? 0.5,
