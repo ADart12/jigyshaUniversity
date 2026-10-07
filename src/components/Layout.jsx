@@ -151,12 +151,16 @@ const Layout = () => {
                 <button
                   onClick={() => setLang('hi')}
                   className={`px-2.5 py-1 rounded-full transition-colors ${lang === 'hi' ? 'bg-[#0284c7] text-white font-semibold' : 'text-gray-400 hover:text-white'}`}
+                  aria-label="Switch to Hindi"
+                  title="हिन्दी (Hindi)"
                 >
-                  नेपाली
+                  हिन्दी
                 </button>
                 <button
                   onClick={() => setLang('en')}
                   className={`px-2.5 py-1 rounded-full transition-colors ${lang === 'en' ? 'bg-[#0284c7] text-white font-semibold' : 'text-gray-400 hover:text-white'}`}
+                  aria-label="Switch to English"
+                  title="English"
                 >
                   EN
                 </button>
@@ -211,10 +215,27 @@ const Layout = () => {
               <Link
                 to="/officials"
                 onClick={() => setMobileMenuOpen(false)}
-                className="flex items-center gap-3 px-4 py-3 text-sm text-mist hover:text-white"
+                className="flex items-center gap-3 px-4 py-3 text-sm text-mist hover:text-white border-b border-white/10"
               >
                 Officials
               </Link>
+              <div className="flex items-center justify-between px-4 py-3 text-sm">
+                <span className="text-mist">Language / भाषा</span>
+                <div className="flex items-center bg-[#1e293b] rounded-full p-0.5 border border-white/10 text-xs">
+                  <button
+                    onClick={() => setLang('hi')}
+                    className={`px-2.5 py-1 rounded-full transition-colors ${lang === 'hi' ? 'bg-[#0284c7] text-white font-semibold' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    हिन्दी
+                  </button>
+                  <button
+                    onClick={() => setLang('en')}
+                    className={`px-2.5 py-1 rounded-full transition-colors ${lang === 'en' ? 'bg-[#0284c7] text-white font-semibold' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    EN
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
